@@ -1,7 +1,9 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import St from 'gi://St';
+import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
@@ -35,17 +37,16 @@ export default class AodExtension extends Extension {
         this._connect(global.display,'restacked',()=>this._syncWindows());
         this._connect(global.window_manager,'map',()=>this._syncWindows());
         this._connect(global.window_manager,'destroy',()=>this._syncWindows());
-        this._connect(global.workspace_manager,'active-workspace-changed',()=>this.wake());
-        this._connect(Main.layoutManager,'monitors-changed',()=>this.wake());
-        this._connect(Main.sessionMode,'updated',()=>{if(Main.sessionMode.isLocked&&!this._usingShield)this.wake();});
-        this._connect(global.stage,'captured-event',(_stage,event)=>{
-            if(!this.active)return Clutter.EVENT_PROPAGATE;
-            if([Clutter.EventType.MOTION,Clutter.EventType.BUTTON_PRESS,Clutter.EventType.KEY_PRESS,
-                Clutter.EventType.SCROLL,Clutter.EventType.TOUCH_BEGIN].includes(event.type())){
-                this.wake();return Clutter.EVENT_STOP;
-            }
-            return Clutter.EVENT_PROPAGATE;
+        this._connect(global.workspace_manager,'active-workspace-changed',()=>this._syncWindows());
+        this._connect(Main.layoutManager,'monitors-changed',()=>{
+            this._overlay?.set_size(global.stage.width,global.stage.height);this._syncWindows();
         });
+        this._connect(Main.uiGroup,'child-added',()=>this._raiseAod());
+        this._connect(global.stage,'child-added',()=>this._raiseAod());
+        this._connect(global.stage,'before-paint',()=>this._raiseAod());
+        this._connect(Main.sessionMode,'updated',()=>{if(Main.sessionMode.isLocked&&!this._usingShield)this.wake();});
+        this._connect(global.stage,'captured-event',(_stage,event)=>this._onCapturedEvent(event));
+        this._connect(Main.uiGroup,'captured-event',(_group,event)=>this._onCapturedEvent(event));
         this._inhibitorSignal=Gio.DBus.session.signal_subscribe('org.gnome.SessionManager',
             'org.gnome.SessionManager',null,'/org/gnome/SessionManager',null,
             Gio.DBusSignalFlags.NONE,(_connection,_sender,_path,_iface,signal)=>{
@@ -55,6 +56,20 @@ export default class AodExtension extends Extension {
         this._watchIdle();
     }
     _connect(object,signal,callback) {this._signals.push([object,object.connect(signal,callback)]);}
+    _onCapturedEvent(event) {
+        if(!this.active)return Clutter.EVENT_PROPAGATE;
+        if(![Clutter.EventType.MOTION,Clutter.EventType.BUTTON_PRESS,Clutter.EventType.KEY_PRESS,
+            Clutter.EventType.SCROLL,Clutter.EventType.TOUCH_BEGIN,Clutter.EventType.TOUCH_UPDATE,
+            Clutter.EventType.TOUCHPAD_SWIPE,Clutter.EventType.TOUCHPAD_PINCH,Clutter.EventType.TOUCHPAD_HOLD].includes(event.type()))return Clutter.EVENT_PROPAGATE;
+        // Surface changes can synthesize pointer motion without any HID activity.
+        if(!(event.get_flags()&Clutter.EventFlags.FLAG_SYNTHETIC))this.wake();
+        return Clutter.EVENT_STOP;
+    }
+    _raiseAod() {
+        const actor=this._overlay??(this._usingShield?Main.screenShield.actor:null);
+        const parent=actor?.get_parent();
+        if(parent&&parent.get_last_child()!==actor)parent.set_child_above_sibling(actor,null);
+    }
     _syncToggle() {
         this._toggle.subtitle=this._settings.get_boolean('automatic')
             ?(this._settings.get_string('mode')==='lockscreen'?'Lockscreen':'Live windows'):'Off';
@@ -66,14 +81,13 @@ export default class AodExtension extends Extension {
         this._idleWatch=this._idle.add_idle_watch(this._settings.get_uint('idle-seconds')*1000,()=>this._tryIdle());
     }
     _tryIdle() {
-        if(!this._enabled||!this._settings.get_boolean('automatic'))return;
+        if(!this._enabled||this.active||!this._settings.get_boolean('automatic'))return;
         const generation=this._generation;
         Gio.DBus.session.call('org.gnome.SessionManager','/org/gnome/SessionManager',
             'org.gnome.SessionManager','IsInhibited',new GLib.Variant('(u)',[8]),
             new GLib.VariantType('(b)'),Gio.DBusCallFlags.NONE,1000,null,(connection,result)=>{
                 try {
                     const [inhibited]=connection.call_finish(result).deepUnpack();
-                    if(this._enabled&&generation===this._generation&&inhibited&&this.active){this.wake();return;}
                     if(this._enabled&&generation===this._generation&&shouldActivate(this._idle.get_idletime(),
                         this._settings.get_uint('idle-seconds'),inhibited,Main.sessionMode.isLocked))this.enter();
                 }catch(error){console.warn(`AOD idle check: ${error.message}`);}
@@ -102,8 +116,12 @@ export default class AodExtension extends Extension {
         const dialog=shield._dialog;
         if(!dialog){this._usingShield=false;throw Error('GNOME lockscreen is unavailable');}
         shield._shortLightbox.lightOff();shield._longLightbox.lightOff();
+        // GNOME's generic activity and notification wakeups are broader than HID.
+        if(shield._becameActiveId){shield.idleMonitor.remove_watch(shield._becameActiveId);shield._becameActiveId=0;}
+        GObject.signal_handler_block(dialog,shield._wakeUpScreenId);
         this._shieldState={dialog,opacity:dialog.opacity,style:shield.actor.style,
-            background:dialog._backgroundGroup?.visible,dialogStyle:dialog.style,groupStyle:shield._lockDialogGroup.style,panelOpacity:Main.layoutManager.panelBox.opacity,translation:[dialog.translation_x,dialog.translation_y]};
+            inputSignal:dialog.connect('captured-event',(_actor,event)=>this._onCapturedEvent(event)),
+            wakeSignal:shield._wakeUpScreenId,background:dialog._backgroundGroup?.visible,dialogStyle:dialog.style,groupStyle:shield._lockDialogGroup.style,panelOpacity:Main.layoutManager.panelBox.opacity,translation:[dialog.translation_x,dialog.translation_y]};
         shield.actor.set_style('background-color:black;');
         shield._lockDialogGroup.set_style('background-color:black;');
         dialog.set_style('background-color:black;');
@@ -111,6 +129,7 @@ export default class AodExtension extends Extension {
         dialog._backgroundGroup?.hide();
         dialog.opacity=Math.round(this._settings.get_double('brightness')*255);
         if(this._settings.get_boolean('grayscale'))dialog.add_effect_with_name('zenos-aod-grayscale',new Clutter.DesaturateEffect({factor:1}));
+        this._shieldGrab=Main.pushModal(dialog,{actionMode:Shell.ActionMode.SYSTEM_MODAL});
         this._layer=dialog;
     }
     _leaveShield() {
@@ -118,6 +137,9 @@ export default class AodExtension extends Extension {
         this._usingShield=false;this._shieldState=null;
         if(!state)return;
         const shield=Main.screenShield;
+        if(this._shieldGrab){Main.popModal(this._shieldGrab);this._shieldGrab=null;}
+        state.dialog.disconnect(state.inputSignal);
+        GObject.signal_handler_unblock(state.dialog,state.wakeSignal);
         state.dialog.remove_effect_by_name('zenos-aod-grayscale');
         state.dialog.opacity=state.opacity;
         state.dialog.set_translation(...state.translation,0);
@@ -138,19 +160,22 @@ export default class AodExtension extends Extension {
         this._overlay=new St.Widget({name:'zenos-aod',reactive:true,
             layout_manager:new Clutter.FixedLayout(),style:'background-color: black;'});
         this._overlay.set_size(global.stage.width,global.stage.height);
-        Main.uiGroup.add_child(this._overlay);
+        this._overlay.connect('captured-event',(_actor,event)=>this._onCapturedEvent(event));
+        Main.layoutManager.addTopChrome(this._overlay);
+        this._liveGrab=Main.pushModal(this._overlay,{actionMode:Shell.ActionMode.SYSTEM_MODAL});
         this._layer=new Clutter.Actor({layout_manager:new Clutter.FixedLayout()});
         this._overlay.add_child(this._layer);
         }
-        this._shiftIndex=0;this._syncWindows();
+        this._shiftIndex=0;this._syncWindows();this._raiseAod();
         // Clone effects cache their offscreen texture; refresh live progress at 1Hz.
         this._refreshTimer=GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,1,()=>{
             this._syncWindows();
             for(const entry of this._clones.values())entry.effect.queue_repaint();
             return GLib.SOURCE_CONTINUE;
         });
+        // Hidden cursors normally unfocus the pointer, dropping click/scroll events.
+        global.stage.context.get_backend().get_default_seat().inhibit_unfocus();
         global.backend.get_cursor_tracker().inhibit_cursor_visibility();this._cursorHidden=true;
-        this._activeWatch=this._idle.add_user_active_watch(()=>{this._activeWatch=0;this.wake();});
         this._shiftTimer=GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
             this._settings.get_uint('pixel-shift-seconds'),()=>{
                 this._shiftIndex=nextShift(this._shiftIndex);
@@ -159,6 +184,7 @@ export default class AodExtension extends Extension {
             });
     }
     _syncWindows() {
+        this._raiseAod();
         if(!this.active||this._usingShield)return;
         const windows=visibleWindows(global.get_window_actors(),global.workspace_manager.get_active_workspace());
         const wanted=new Set(windows);
@@ -166,19 +192,20 @@ export default class AodExtension extends Extension {
         for(const source of windows){
             let entry=this._clones.get(source);
             if(!entry){
-                const clone=new Clutter.Clone({source});
-                const frame=new St.Widget({style:`border:1px solid rgba(255,255,255,${this._settings.get_double('brightness')});border-radius:12px;`});
+                const clone=new Clutter.Clone({source,visible:false});
+                const frame=new St.Widget({visible:false,style:`border:1px solid rgba(255,255,255,${this._settings.get_double('brightness')});border-radius:12px;`});
                 const effect=new OutlineEffect(this._settings.get_double('brightness'),this._settings.get_boolean('grayscale'));
                 clone.add_effect(effect);this._layer.add_child(clone);this._layer.add_child(frame);
                 const sync=()=>{
                     if(!this.active||!this._clones.has(source))return;
                     const [x,y]=source.get_transformed_position(),[width,height]=source.get_size();
+                    if(width<=0||height<=0){clone.hide();frame.hide();return;}
                     clone.set_position(x,y);clone.set_size(width,height);
                     const rect=source.meta_window.get_frame_rect();
                     frame.set_position(rect.x,rect.y);frame.set_size(rect.width,rect.height);
                     // Window actors include compositor shadows outside the client frame.
                     clone.set_clip(rect.x-x,rect.y-y,rect.width,rect.height);
-                    effect.update(width,height,source.get_resource_scale());
+                    effect.update(width,height,source.get_resource_scale());clone.show();frame.show();
                 };
                 entry={clone,frame,effect,signal:source.connect('notify::allocation',sync)};
                 this._clones.set(source,entry);sync();
@@ -193,13 +220,16 @@ export default class AodExtension extends Extension {
         this._generation++;
         if(this._refreshTimer){GLib.source_remove(this._refreshTimer);this._refreshTimer=0;}
         if(this._shiftTimer){GLib.source_remove(this._shiftTimer);this._shiftTimer=0;}
-        if(this._activeWatch){this._idle.remove_watch(this._activeWatch);this._activeWatch=0;}
         this._restoreTheme();
         if(!this.active)return;
         if(this._usingShield)this._leaveShield();
         for(const [source,entry] of this._clones)this._dropClone(source,entry);
+        if(this._liveGrab){Main.popModal(this._liveGrab);this._liveGrab=null;}
         this._overlay?.destroy();this._overlay=null;this._layer=null;
-        if(this._cursorHidden){global.backend.get_cursor_tracker().uninhibit_cursor_visibility();this._cursorHidden=false;}
+        if(this._cursorHidden){
+            global.backend.get_cursor_tracker().uninhibit_cursor_visibility();
+            global.stage.context.get_backend().get_default_seat().uninhibit_unfocus();this._cursorHidden=false;
+        }
     }
     disable() {
         this._enabled=false;this.wake();
