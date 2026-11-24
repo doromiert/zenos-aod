@@ -36,6 +36,7 @@ export default class Setup extends Extension {
    const {OutlineEffect}=await import(Main.extensionManager.lookup('aod@neg-zero.com').dir.get_child('effect.js').get_uri());
    const enter=aod.enter.bind(aod);
    aod.enter=()=>{
+    this.fixture.visible=aod._settings.get_string('mode')==='live';
     enter();if(!aod._overlay)return;
     const clone=new Clutter.Clone({source:this.fixture,x:200,y:150,width:700,height:420});
     const effect=new OutlineEffect(aod._settings.get_double('brightness'),aod._settings.get_boolean('grayscale'));clone.add_effect(effect);aod._layer.add_child(clone);effect.update(700,420,1);
