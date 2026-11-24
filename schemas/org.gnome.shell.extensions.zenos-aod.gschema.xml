@@ -1,0 +1,5 @@
+<schemalist><schema id="org.gnome.shell.extensions.zenos-aod" path="/org/gnome/shell/extensions/zenos-aod/">
+<key name="idle-seconds" type="u"><default>300</default><range min="10" max="86400"/><summary>Idle time before AOD</summary></key>
+<key name="brightness" type="d"><default>0.30</default><range min="0.03" max="0.5"/><summary>Outline brightness</summary></key>
+<key name="pixel-shift-seconds" type="u"><default>60</default><range min="10" max="600"/><summary>Pixel shift interval</summary></key>
+</schema></schemalist>

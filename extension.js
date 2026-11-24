@@ -1,0 +1,137 @@
+import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
+import St from 'gi://St';
+import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import {OutlineEffect} from './effect.js';
+import {SHIFTS,nextShift,visibleWindows,shouldActivate} from './model.js';
+
+export default class AodExtension extends Extension {
+    enable() {
+        this._enabled=true;this._generation=0;this._clones=new Map();this._signals=[];
+        this._settings=this.getSettings();this._idle=global.backend.get_core_idle_monitor();
+        this._button=new PanelMenu.Button(0,'Always on display');
+        this._button.add_child(new St.Icon({icon_name:'weather-clear-night-symbolic',style_class:'system-status-icon'}));
+        this._button.menu.addAction('Preview always on display',()=>this.enter());
+        this._button.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._button.menu.addAction('AOD settings',()=>this.openPreferences());
+        Main.panel.addToStatusArea(this.uuid,this._button);
+        this._connect(this._settings,'changed',()=>{this.wake();this._watchIdle();});
+        this._connect(global.display,'restacked',()=>this._syncWindows());
+        this._connect(global.window_manager,'map',()=>this._syncWindows());
+        this._connect(global.window_manager,'destroy',()=>this._syncWindows());
+        this._connect(global.workspace_manager,'active-workspace-changed',()=>this.wake());
+        this._connect(Main.layoutManager,'monitors-changed',()=>this.wake());
+        this._connect(Main.sessionMode,'updated',()=>{if(Main.sessionMode.isLocked)this.wake();});
+        this._connect(global.stage,'captured-event',(_stage,event)=>{
+            if(!this.active)return Clutter.EVENT_PROPAGATE;
+            if([Clutter.EventType.MOTION,Clutter.EventType.BUTTON_PRESS,Clutter.EventType.KEY_PRESS,
+                Clutter.EventType.SCROLL,Clutter.EventType.TOUCH_BEGIN].includes(event.type())){
+                this.wake();return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        this._inhibitorSignal=Gio.DBus.session.signal_subscribe('org.gnome.SessionManager',
+            'org.gnome.SessionManager',null,'/org/gnome/SessionManager',null,
+            Gio.DBusSignalFlags.NONE,(_connection,_sender,_path,_iface,signal)=>{
+                if(['InhibitorAdded','InhibitorRemoved'].includes(signal))this._tryIdle();
+            });
+        this._watchIdle();
+    }
+    _connect(object,signal,callback) {this._signals.push([object,object.connect(signal,callback)]);}
+    _watchIdle() {
+        if(this._idleWatch)this._idle.remove_watch(this._idleWatch);
+        this._idleWatch=this._idle.add_idle_watch(this._settings.get_uint('idle-seconds')*1000,()=>this._tryIdle());
+    }
+    _tryIdle() {
+        if(!this._enabled)return;
+        const generation=this._generation;
+        Gio.DBus.session.call('org.gnome.SessionManager','/org/gnome/SessionManager',
+            'org.gnome.SessionManager','IsInhibited',new GLib.Variant('(u)',[8]),
+            new GLib.VariantType('(b)'),Gio.DBusCallFlags.NONE,1000,null,(connection,result)=>{
+                try {
+                    const [inhibited]=connection.call_finish(result).deepUnpack();
+                    if(this._enabled&&generation===this._generation&&inhibited&&this.active){this.wake();return;}
+                    if(this._enabled&&generation===this._generation&&shouldActivate(this._idle.get_idletime(),
+                        this._settings.get_uint('idle-seconds'),inhibited,Main.sessionMode.isLocked))this.enter();
+                }catch(error){console.warn(`AOD idle check: ${error.message}`);}
+            });
+    }
+    get active(){return Boolean(this._overlay);}
+    enter() {
+        if(!this._enabled||this.active||Main.sessionMode.isLocked)return;
+        this._button.menu.close();
+        this._overlay=new St.Widget({name:'zenos-aod',reactive:true,
+            layout_manager:new Clutter.FixedLayout(),style:'background-color: black;'});
+        this._overlay.set_size(global.stage.width,global.stage.height);
+        Main.uiGroup.add_child(this._overlay);
+        this._layer=new Clutter.Actor({layout_manager:new Clutter.FixedLayout()});
+        this._overlay.add_child(this._layer);
+        this._shiftIndex=0;this._syncWindows();
+        // Clone effects cache their offscreen texture; refresh live progress at 1Hz.
+        this._refreshTimer=GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,1,()=>{
+            this._syncWindows();
+            for(const entry of this._clones.values())entry.effect.queue_repaint();
+            return GLib.SOURCE_CONTINUE;
+        });
+        global.backend.get_cursor_tracker().inhibit_cursor_visibility();this._cursorHidden=true;
+        this._activeWatch=this._idle.add_user_active_watch(()=>{this._activeWatch=0;this.wake();});
+        this._shiftTimer=GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
+            this._settings.get_uint('pixel-shift-seconds'),()=>{
+                this._shiftIndex=nextShift(this._shiftIndex);
+                const [x,y]=SHIFTS[this._shiftIndex];this._layer.set_translation(x,y,0);
+                return GLib.SOURCE_CONTINUE;
+            });
+    }
+    _syncWindows() {
+        if(!this.active)return;
+        const windows=visibleWindows(global.get_window_actors(),global.workspace_manager.get_active_workspace());
+        const wanted=new Set(windows);
+        for(const [source,entry] of this._clones)if(!wanted.has(source))this._dropClone(source,entry);
+        for(const source of windows){
+            let entry=this._clones.get(source);
+            if(!entry){
+                const clone=new Clutter.Clone({source});
+                const frame=new St.Widget({style:`border:1px solid rgba(255,255,255,${this._settings.get_double('brightness')});border-radius:12px;`});
+                const effect=new OutlineEffect(this._settings.get_double('brightness'));
+                clone.add_effect(effect);this._layer.add_child(clone);this._layer.add_child(frame);
+                const sync=()=>{
+                    if(!this.active||!this._clones.has(source))return;
+                    const [x,y]=source.get_transformed_position(),[width,height]=source.get_size();
+                    clone.set_position(x,y);clone.set_size(width,height);
+                    const rect=source.meta_window.get_frame_rect();
+                    frame.set_position(rect.x,rect.y);frame.set_size(rect.width,rect.height);
+                    effect.update(width,height,source.get_resource_scale());
+                };
+                entry={clone,frame,effect,signal:source.connect('notify::allocation',sync)};
+                this._clones.set(source,entry);sync();
+            }
+            this._layer.set_child_above_sibling(entry.clone,null);this._layer.set_child_above_sibling(entry.frame,null);
+        }
+    }
+    _dropClone(source,entry) {
+        source.disconnect(entry.signal);entry.frame.destroy();entry.clone.destroy();this._clones.delete(source);
+    }
+    wake() {
+        this._generation++;
+        if(this._refreshTimer){GLib.source_remove(this._refreshTimer);this._refreshTimer=0;}
+        if(this._shiftTimer){GLib.source_remove(this._shiftTimer);this._shiftTimer=0;}
+        if(this._activeWatch){this._idle.remove_watch(this._activeWatch);this._activeWatch=0;}
+        if(!this.active)return;
+        for(const [source,entry] of this._clones)this._dropClone(source,entry);
+        this._overlay.destroy();this._overlay=null;this._layer=null;
+        if(this._cursorHidden){global.backend.get_cursor_tracker().uninhibit_cursor_visibility();this._cursorHidden=false;}
+    }
+    disable() {
+        this._enabled=false;this.wake();
+        if(this._idleWatch)this._idle.remove_watch(this._idleWatch);
+        this._idleWatch=0;
+        if(this._inhibitorSignal)Gio.DBus.session.signal_unsubscribe(this._inhibitorSignal);
+        for(const [object,id] of this._signals??[])object.disconnect(id);
+        this._signals=[];this._button?.destroy();this._button=null;
+        this._settings=null;this._idle=null;
+    }
+}
