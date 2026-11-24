@@ -18,9 +18,13 @@ export default class Setup extends Extension {
  write(name,data){GLib.file_set_contents(this.root+'/'+name,JSON.stringify(data));}
  async capture(name){const stream=Gio.File.new_for_path(this.root+'/'+name).replace(null,false,Gio.FileCreateFlags.NONE,null);try{await new Shell.Screenshot().screenshot(false,stream);}finally{stream.close(null);}}
  async run(aod){
+  const shellSettings=new Gio.Settings({schema_id:'org.gnome.shell'});
+  shellSettings.set_strv('enabled-extensions',['aod@neg-zero.com','aod-test@zenos.test','CustomizeClockOnLockScreen@pratap.fastmail.fm']);
+  shellSettings.set_boolean('disable-user-extensions',false);
   if(GLib.getenv('AOD_INTERACTIVE')!=='1'){
    const test=await import(this.dir.get_child('native-test.js').get_uri());await test.run(this,aod);return;
   }
+  const style=GLib.getenv('AOD_PREVIEW_MODE');if(style)aod._settings.set_string('mode',style);
   Main.overview.hide();await delay(500);
   // A shell actor fixture exercises filtering without reading the user's windows.
   this.fixture=new St.BoxLayout({vertical:true,width:700,height:420,x:200,y:150,style:'background-color:#303034;padding:30px;spacing:20px;'});
@@ -32,7 +36,7 @@ export default class Setup extends Extension {
    const {OutlineEffect}=await import(Main.extensionManager.lookup('aod@neg-zero.com').dir.get_child('effect.js').get_uri());
    const enter=aod.enter.bind(aod);
    aod.enter=()=>{
-    enter();if(!aod.active)return;
+    enter();if(!aod._overlay)return;
     const clone=new Clutter.Clone({source:this.fixture,x:200,y:150,width:700,height:420});
     const effect=new OutlineEffect(0.25);clone.add_effect(effect);aod._layer.add_child(clone);effect.update(700,420,1);
     aod._layer.add_child(new St.Widget({x:200,y:150,width:700,height:420,style:'border:1px solid rgba(255,255,255,0.25);border-radius:12px;'}));
@@ -46,7 +50,7 @@ export default class Setup extends Extension {
    aod.enter();
    this.commandTimer=GLib.timeout_add(GLib.PRIORITY_DEFAULT,100,()=>{
     const f=Gio.File.new_for_path(this.root+'/command.json');
-    if(f.query_exists(null)){const [,data]=f.load_contents(null);f.delete(null);const command=JSON.parse(new TextDecoder().decode(data));if(command.action==='enter')aod.enter();else if(command.action==='wake')aod.wake();else if(command.action==='capture')this.capture('current.png');}
+    if(f.query_exists(null)){const [,data]=f.load_contents(null);f.delete(null);const command=JSON.parse(new TextDecoder().decode(data));if(command.action==='enter')aod.enter();else if(command.action==='wake')aod.wake();else if(command.action==='style'){aod._settings.set_string('mode',command.mode);aod.enter();}else if(command.action==='capture')this.capture('current.png');}
     return GLib.SOURCE_CONTINUE;
    });
    this.write('ready.json',{pid:Gio.Credentials.new().get_unix_pid(),bus:GLib.getenv('DBUS_SESSION_BUS_ADDRESS'),display:GLib.getenv('DISPLAY'),xauthority:GLib.getenv('XAUTHORITY')});return;

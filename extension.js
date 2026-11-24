@@ -12,20 +12,23 @@ import {SHIFTS,nextShift,visibleWindows,shouldActivate} from './model.js';
 export default class AodExtension extends Extension {
     enable() {
         this._enabled=true;this._generation=0;this._clones=new Map();this._signals=[];
-        this._settings=this.getSettings();this._idle=global.backend.get_core_idle_monitor();
+        this._settings=this.getSettings();
+        this._interfaceSettings=new Gio.Settings({schema_id:'org.gnome.desktop.interface'});
+        this._restoreTheme();
+        this._idle=global.backend.get_core_idle_monitor();
         this._button=new PanelMenu.Button(0,'Always on display');
         this._button.add_child(new St.Icon({icon_name:'weather-clear-night-symbolic',style_class:'system-status-icon'}));
         this._button.menu.addAction('Preview always on display',()=>this.enter());
         this._button.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._button.menu.addAction('AOD settings',()=>this.openPreferences());
         Main.panel.addToStatusArea(this.uuid,this._button);
-        this._connect(this._settings,'changed',()=>{this.wake();this._watchIdle();});
+        this._connect(this._settings,'changed',(_settings,key)=>{if(key==='original-color-scheme')return;this.wake();this._watchIdle();});
         this._connect(global.display,'restacked',()=>this._syncWindows());
         this._connect(global.window_manager,'map',()=>this._syncWindows());
         this._connect(global.window_manager,'destroy',()=>this._syncWindows());
         this._connect(global.workspace_manager,'active-workspace-changed',()=>this.wake());
         this._connect(Main.layoutManager,'monitors-changed',()=>this.wake());
-        this._connect(Main.sessionMode,'updated',()=>{if(Main.sessionMode.isLocked)this.wake();});
+        this._connect(Main.sessionMode,'updated',()=>{if(Main.sessionMode.isLocked&&!this._usingShield)this.wake();});
         this._connect(global.stage,'captured-event',(_stage,event)=>{
             if(!this.active)return Clutter.EVENT_PROPAGATE;
             if([Clutter.EventType.MOTION,Clutter.EventType.BUTTON_PRESS,Clutter.EventType.KEY_PRESS,
@@ -39,6 +42,7 @@ export default class AodExtension extends Extension {
             Gio.DBusSignalFlags.NONE,(_connection,_sender,_path,_iface,signal)=>{
                 if(['InhibitorAdded','InhibitorRemoved'].includes(signal))this._tryIdle();
             });
+        this._connect(Main.screenShield,'locked-changed',()=>{if(Main.screenShield.locked)this.wake();});
         this._watchIdle();
     }
     _connect(object,signal,callback) {this._signals.push([object,object.connect(signal,callback)]);}
@@ -60,16 +64,67 @@ export default class AodExtension extends Extension {
                 }catch(error){console.warn(`AOD idle check: ${error.message}`);}
             });
     }
-    get active(){return Boolean(this._overlay);}
+    _forceDarkTheme() {
+        const value=this._interfaceSettings.get_user_value('color-scheme');
+        this._settings.set_string('original-color-scheme',JSON.stringify(value?.deepUnpack()??null));
+        this._interfaceSettings.set_string('color-scheme','prefer-dark');
+    }
+    _restoreTheme() {
+        const saved=this._settings?.get_string('original-color-scheme');
+        if(!saved)return;
+        try {
+            const value=JSON.parse(saved);
+            if(this._interfaceSettings.get_string('color-scheme')==='prefer-dark'){
+                if(value===null)this._interfaceSettings.reset('color-scheme');
+                else this._interfaceSettings.set_string('color-scheme',value);
+            }
+        }finally{this._settings.set_string('original-color-scheme','');}
+    }
+    _enterShield() {
+        const shield=Main.screenShield;
+        // Activate GNOME's genuine curtain without changing its authentication state.
+        this._usingShield=true;shield.activate(false);
+        const dialog=shield._dialog;
+        if(!dialog){this._usingShield=false;throw Error('GNOME lockscreen is unavailable');}
+        shield._shortLightbox.lightOff();shield._longLightbox.lightOff();
+        this._shieldState={dialog,opacity:dialog.opacity,style:shield.actor.style,
+            background:dialog._backgroundGroup?.visible,dialogStyle:dialog.style,groupStyle:shield._lockDialogGroup.style,panelOpacity:Main.layoutManager.panelBox.opacity,translation:[dialog.translation_x,dialog.translation_y]};
+        shield.actor.set_style('background-color:black;');
+        shield._lockDialogGroup.set_style('background-color:black;');
+        dialog.set_style('background-color:black;');
+        Main.layoutManager.panelBox.opacity=0;
+        dialog._backgroundGroup?.hide();
+        dialog.opacity=Math.round(this._settings.get_double('brightness')*255);
+        this._layer=dialog;
+    }
+    _leaveShield() {
+        const state=this._shieldState;
+        this._usingShield=false;this._shieldState=null;
+        if(!state)return;
+        const shield=Main.screenShield;
+        state.dialog.opacity=state.opacity;
+        state.dialog.set_translation(...state.translation,0);
+        if(state.background)state.dialog._backgroundGroup?.show();
+        shield.actor.set_style(state.style??'');
+        shield._lockDialogGroup.set_style(state.groupStyle??'');
+        state.dialog.set_style(state.dialogStyle??'');
+        Main.layoutManager.panelBox.opacity=state.panelOpacity;
+        // Never dismiss a real manual lock or alter GNOME's locked hint.
+        if(!shield.locked)shield.deactivate(false);
+    }
+    get active(){return Boolean(this._overlay||this._usingShield);}
     enter() {
         if(!this._enabled||this.active||Main.sessionMode.isLocked)return;
-        this._button.menu.close();
+        this._button.menu.close();this._forceDarkTheme();
+        if(this._settings.get_string('mode')==='lockscreen')this._enterShield();
+        else {
         this._overlay=new St.Widget({name:'zenos-aod',reactive:true,
             layout_manager:new Clutter.FixedLayout(),style:'background-color: black;'});
         this._overlay.set_size(global.stage.width,global.stage.height);
         Main.uiGroup.add_child(this._overlay);
         this._layer=new Clutter.Actor({layout_manager:new Clutter.FixedLayout()});
         this._overlay.add_child(this._layer);
+        }
         this._shiftIndex=0;this._syncWindows();
         // Clone effects cache their offscreen texture; refresh live progress at 1Hz.
         this._refreshTimer=GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,1,()=>{
@@ -87,7 +142,7 @@ export default class AodExtension extends Extension {
             });
     }
     _syncWindows() {
-        if(!this.active)return;
+        if(!this.active||this._usingShield)return;
         const windows=visibleWindows(global.get_window_actors(),global.workspace_manager.get_active_workspace());
         const wanted=new Set(windows);
         for(const [source,entry] of this._clones)if(!wanted.has(source))this._dropClone(source,entry);
@@ -104,6 +159,8 @@ export default class AodExtension extends Extension {
                     clone.set_position(x,y);clone.set_size(width,height);
                     const rect=source.meta_window.get_frame_rect();
                     frame.set_position(rect.x,rect.y);frame.set_size(rect.width,rect.height);
+                    // Window actors include compositor shadows outside the client frame.
+                    clone.set_clip(rect.x-x,rect.y-y,rect.width,rect.height);
                     effect.update(width,height,source.get_resource_scale());
                 };
                 entry={clone,frame,effect,signal:source.connect('notify::allocation',sync)};
@@ -120,9 +177,11 @@ export default class AodExtension extends Extension {
         if(this._refreshTimer){GLib.source_remove(this._refreshTimer);this._refreshTimer=0;}
         if(this._shiftTimer){GLib.source_remove(this._shiftTimer);this._shiftTimer=0;}
         if(this._activeWatch){this._idle.remove_watch(this._activeWatch);this._activeWatch=0;}
+        this._restoreTheme();
         if(!this.active)return;
+        if(this._usingShield)this._leaveShield();
         for(const [source,entry] of this._clones)this._dropClone(source,entry);
-        this._overlay.destroy();this._overlay=null;this._layer=null;
+        this._overlay?.destroy();this._overlay=null;this._layer=null;
         if(this._cursorHidden){global.backend.get_cursor_tracker().uninhibit_cursor_visibility();this._cursorHidden=false;}
     }
     disable() {
@@ -132,6 +191,6 @@ export default class AodExtension extends Extension {
         if(this._inhibitorSignal)Gio.DBus.session.signal_unsubscribe(this._inhibitorSignal);
         for(const [object,id] of this._signals??[])object.disconnect(id);
         this._signals=[];this._button?.destroy();this._button=null;
-        this._settings=null;this._idle=null;
+        this._settings=null;this._interfaceSettings=null;this._idle=null;
     }
 }

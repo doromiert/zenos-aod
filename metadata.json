@@ -1,1 +1,15 @@
-{"uuid":"aod@neg-zero.com","name":"ZenOS Always On Display","description":"Live dim window outlines and text on black while idle, without locking the session.","shell-version":["50"],"settings-schema":"org.gnome.shell.extensions.zenos-aod","version":1,"url":"https://github.com/doromiert/zenos-aod"}
+{
+  "uuid": "aod@neg-zero.com",
+  "name": "ZenOS Always On Display",
+  "description": "Live dim window outlines and text on black while idle, without locking the session.",
+  "shell-version": [
+    "50"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.zenos-aod",
+  "version": 2,
+  "url": "https://github.com/doromiert/zenos-aod",
+  "session-modes": [
+    "user",
+    "unlock-dialog"
+  ]
+}

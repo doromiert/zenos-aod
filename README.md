@@ -18,7 +18,19 @@ firmware protection. No credentials, screenshots or window contents are persiste
 
 The ZenOS user option `users.<name>.theming.gnome.aod.enable` installs/enables the
 extension and selects AOD in place of native session idle blanking/automatic
-locking. Removing that selection returns native policy to its other configured
+locking. Dark mode is requested only while AOD is active; the previous explicit
+or unset theme preference is saved and restored on wake, disable, or recovery
+after a Shell restart. Applications that ignore GNOME's color-scheme preference
+may retain their own theme.
+
+AOD Settings offers **Live windows** and **GNOME lockscreen**. The second mode
+uses GNOME's actual screen-shield dialog and clock, including installed
+lockscreen extension customizations, with the wallpaper hidden and content dimmed.
+It activates the native curtain without setting the authenticated locked state;
+first input returns to the desktop. A subsequent manual lock remains a real lock
+and is never dismissed by AOD cleanup.
+
+Removing that selection returns native policy to its other configured
 values. Disabling only the extension at runtime leaves the declared AOD policy
 selected; turn the user option off to return to native blanking.
 

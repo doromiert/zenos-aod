@@ -12,12 +12,18 @@ export const OutlineEffect = GObject.registerClass(class OutlineEffect extends S
         `, `
             vec2 p=cogl_tex_coord_in[0].xy;
             float c=aod_luma(p);
-            float background=(aod_luma(vec2(0.12,0.12))+aod_luma(vec2(0.88,0.12))+
-                              aod_luma(vec2(0.12,0.88))+aod_luma(vec2(0.88,0.88)))*0.25;
+            float background=(aod_luma(vec2(0.20,0.40))+aod_luma(vec2(0.80,0.40))+
+                              aod_luma(vec2(0.20,0.80))+aod_luma(vec2(0.80,0.80)))*0.25;
             // Preserve filled foreground pixels instead of tracing glyph edges.
             if(background>0.5){c=1.0-c;background=1.0-background;}
             float ink=smoothstep(0.02,0.28,max(0.0,c-background));
-            cogl_color_out=vec4(vec3(ink*aod_brightness),1.0);
+            vec4 source=texture2D(cogl_sampler0,p);
+            float alpha=source.a;
+            vec3 color=source.rgb/max(alpha,0.0001);
+            float peak=max(color.r,max(color.g,color.b));
+            // Preserve the original hue; dark glyphs on light surfaces need light ink.
+            vec3 hue=peak>0.04?color/peak:vec3(1.0);
+            cogl_color_out=vec4(hue*ink*aod_brightness*alpha,alpha);
         `,false);
     }
     update(_width,_height,_scale=1) {
