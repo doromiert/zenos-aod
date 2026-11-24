@@ -56,6 +56,13 @@ export async function run(setup,aod){
    await delay(80);aod._tryIdle();await delay(100);assert(!aod.active,'idle inhibitor ignored');
    inhibited=false;service.emit_signal('InhibitorRemoved',new GLib.Variant('(o)',['/test/inhibitor']));await delay(120);assert(aod.active,'idle did not activate after inhibitor removed');
    inhibited=true;service.emit_signal('InhibitorAdded',new GLib.Variant('(o)',['/test/inhibitor']));await delay(120);assert(!aod.active,'new inhibitor did not wake AOD');
+   aod._idle=oldIdle;inhibited=false;
+   aod._settings.set_uint('idle-seconds',10);
+   pointer.notify_absolute_motion(GLib.get_monotonic_time(),55,85);await delay(100);
+   aod._watchIdle();await delay(10800);
+   assert(aod.active,'real native idle timeout did not activate AOD');
+   aod.wake();aod._settings.set_uint('idle-seconds',300);
+
   }finally{aod.wake();aod._idle=oldIdle;service.unexport();Gio.bus_unown_name(owner);}
   const settingsProcess=new Gio.SubprocessLauncher({flags:Gio.SubprocessFlags.NONE});
   settingsProcess.setenv('GSETTINGS_SCHEMA_DIR',Main.extensionManager.lookup('aod@neg-zero.com').dir.get_child('schemas').get_path(),true);
@@ -77,6 +84,6 @@ export async function run(setup,aod){
   aod.disable();assert(removed,'tile survived extension disable');
   aod.enable();assert(aod._toggle!==tile&&aod._toggle.get_parent(),'tile failed to return after re-enable');
   assert(beat<400,'UI heartbeat exceeded400ms');
-  setup.write('result.json',{pass:true,nativeWindow:true,liveUpdates:true,filledText:true,windowFrame:true,shadowClipped:true,themeRestore:true,nativeLockscreen:true,sharedPreferences:true,grayscaleBothModes:true,quickSettingsTile:true,frameRect:{x:initialRect.x,y:initialRect.y,width:initialRect.width,height:initialRect.height},keyboardWake:true,pointerWake:true,cleanup:true,idleInhibitors:true,maxGap:beat});
+  setup.write('result.json',{pass:true,nativeWindow:true,liveUpdates:true,filledText:true,windowFrame:true,shadowClipped:true,themeRestore:true,nativeLockscreen:true,sharedPreferences:true,grayscaleBothModes:true,quickSettingsTile:true,frameRect:{x:initialRect.x,y:initialRect.y,width:initialRect.width,height:initialRect.height},keyboardWake:true,pointerWake:true,cleanup:true,idleInhibitors:true,nativeIdleTimeout:true,maxGap:beat});
  }finally{GLib.source_remove(timer);aod.wake();app.force_exit();}
 }
