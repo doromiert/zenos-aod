@@ -39,7 +39,8 @@ export default class AodExtension extends Extension {
         this._connect(global.window_manager,'destroy',()=>this._syncWindows());
         this._connect(global.workspace_manager,'active-workspace-changed',()=>this._syncWindows());
         this._connect(Main.layoutManager,'monitors-changed',()=>{
-            this._overlay?.set_size(global.stage.width,global.stage.height);this._syncWindows();
+            this._overlay?.set_size(global.stage.width,global.stage.height);
+            this._shieldState?.input.set_size(global.stage.width,global.stage.height);this._syncWindows();
         });
         this._connect(Main.uiGroup,'child-added',()=>this._raiseAod());
         this._connect(global.stage,'child-added',()=>this._raiseAod());
@@ -62,7 +63,9 @@ export default class AodExtension extends Extension {
             Clutter.EventType.SCROLL,Clutter.EventType.TOUCH_BEGIN,Clutter.EventType.TOUCH_UPDATE,
             Clutter.EventType.TOUCHPAD_SWIPE,Clutter.EventType.TOUCHPAD_PINCH,Clutter.EventType.TOUCHPAD_HOLD].includes(event.type()))return Clutter.EVENT_PROPAGATE;
         // Surface changes can synthesize pointer motion without any HID activity.
-        if(!(event.get_flags()&Clutter.EventFlags.FLAG_SYNTHETIC))this.wake();
+        // Keep the grab until dispatch ends so the wake event cannot reach native gestures.
+        if(!(event.get_flags()&Clutter.EventFlags.FLAG_SYNTHETIC)&&!this._inputWake)
+            this._inputWake=GLib.idle_add_once(GLib.PRIORITY_DEFAULT,()=>{this._inputWake=0;this.wake();});
         return Clutter.EVENT_STOP;
     }
     _raiseAod() {
@@ -119,8 +122,11 @@ export default class AodExtension extends Extension {
         // GNOME's generic activity and notification wakeups are broader than HID.
         if(shield._becameActiveId){shield.idleMonitor.remove_watch(shield._becameActiveId);shield._becameActiveId=0;}
         GObject.signal_handler_block(dialog,shield._wakeUpScreenId);
-        this._shieldState={dialog,opacity:dialog.opacity,style:shield.actor.style,
-            inputSignal:dialog.connect('captured-event',(_actor,event)=>this._onCapturedEvent(event)),
+        // Capture on a separate actor so native click/swipe gestures never begin.
+        const input=new St.Widget({reactive:true});
+        input.set_size(global.stage.width,global.stage.height);shield.actor.add_child(input);
+        input.connect('captured-event',(_actor,event)=>this._onCapturedEvent(event));
+        this._shieldState={dialog,input,opacity:dialog.opacity,style:shield.actor.style,
             wakeSignal:shield._wakeUpScreenId,background:dialog._backgroundGroup?.visible,dialogStyle:dialog.style,groupStyle:shield._lockDialogGroup.style,panelOpacity:Main.layoutManager.panelBox.opacity,translation:[dialog.translation_x,dialog.translation_y]};
         shield.actor.set_style('background-color:black;');
         shield._lockDialogGroup.set_style('background-color:black;');
@@ -129,7 +135,7 @@ export default class AodExtension extends Extension {
         dialog._backgroundGroup?.hide();
         dialog.opacity=Math.round(this._settings.get_double('brightness')*255);
         if(this._settings.get_boolean('grayscale'))dialog.add_effect_with_name('zenos-aod-grayscale',new Clutter.DesaturateEffect({factor:1}));
-        this._shieldGrab=Main.pushModal(dialog,{actionMode:Shell.ActionMode.SYSTEM_MODAL});
+        this._shieldGrab=Main.pushModal(input,{actionMode:Shell.ActionMode.SYSTEM_MODAL});
         this._layer=dialog;
     }
     _leaveShield() {
@@ -138,7 +144,7 @@ export default class AodExtension extends Extension {
         if(!state)return;
         const shield=Main.screenShield;
         if(this._shieldGrab){Main.popModal(this._shieldGrab);this._shieldGrab=null;}
-        state.dialog.disconnect(state.inputSignal);
+        state.input.destroy();
         GObject.signal_handler_unblock(state.dialog,state.wakeSignal);
         state.dialog.remove_effect_by_name('zenos-aod-grayscale');
         state.dialog.opacity=state.opacity;
@@ -217,6 +223,7 @@ export default class AodExtension extends Extension {
         source.disconnect(entry.signal);entry.frame.destroy();entry.clone.destroy();this._clones.delete(source);
     }
     wake() {
+        if(this._inputWake){GLib.source_remove(this._inputWake);this._inputWake=0;}
         this._generation++;
         if(this._refreshTimer){GLib.source_remove(this._refreshTimer);this._refreshTimer=0;}
         if(this._shiftTimer){GLib.source_remove(this._shiftTimer);this._shiftTimer=0;}
