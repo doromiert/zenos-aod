@@ -95,6 +95,7 @@ export default class AodExtension extends Extension {
         Main.layoutManager.panelBox.opacity=0;
         dialog._backgroundGroup?.hide();
         dialog.opacity=Math.round(this._settings.get_double('brightness')*255);
+        if(this._settings.get_boolean('grayscale'))dialog.add_effect_with_name('zenos-aod-grayscale',new Clutter.DesaturateEffect({factor:1}));
         this._layer=dialog;
     }
     _leaveShield() {
@@ -102,6 +103,7 @@ export default class AodExtension extends Extension {
         this._usingShield=false;this._shieldState=null;
         if(!state)return;
         const shield=Main.screenShield;
+        state.dialog.remove_effect_by_name('zenos-aod-grayscale');
         state.dialog.opacity=state.opacity;
         state.dialog.set_translation(...state.translation,0);
         if(state.background)state.dialog._backgroundGroup?.show();
@@ -151,7 +153,7 @@ export default class AodExtension extends Extension {
             if(!entry){
                 const clone=new Clutter.Clone({source});
                 const frame=new St.Widget({style:`border:1px solid rgba(255,255,255,${this._settings.get_double('brightness')});border-radius:12px;`});
-                const effect=new OutlineEffect(this._settings.get_double('brightness'));
+                const effect=new OutlineEffect(this._settings.get_double('brightness'),this._settings.get_boolean('grayscale'));
                 clone.add_effect(effect);this._layer.add_child(clone);this._layer.add_child(frame);
                 const sync=()=>{
                     if(!this.active||!this._clones.has(source))return;

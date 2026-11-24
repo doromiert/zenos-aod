@@ -11,6 +11,8 @@ export default class AodPreferences extends ExtensionPreferences {
         mode.connect('notify::selected',()=>settings.set_string('mode',mode.selected===1?'lockscreen':'live'));
         settings.connect('changed::mode',()=>{mode.selected=settings.get_string('mode')==='lockscreen'?1:0;});
         group.add(mode);
+        const grayscale=new Adw.SwitchRow({title:'Grayscale',subtitle:'Remove colors from either AOD style'});
+        settings.bind('grayscale',grayscale,'active',0);group.add(grayscale);
         for(const [key,title,min,max,step] of [['idle-seconds','Idle delay (seconds)',10,86400,30],
             ['brightness','AOD brightness',0.03,0.5,0.01],['pixel-shift-seconds','Pixel shift interval (seconds)',10,600,10]]){
             const row=new Adw.SpinRow({title,adjustment:new Gtk.Adjustment({lower:min,upper:max,step_increment:step,page_increment:step*5}),digits:key==='brightness'?2:0});

@@ -38,7 +38,7 @@ export default class Setup extends Extension {
    aod.enter=()=>{
     enter();if(!aod._overlay)return;
     const clone=new Clutter.Clone({source:this.fixture,x:200,y:150,width:700,height:420});
-    const effect=new OutlineEffect(0.25);clone.add_effect(effect);aod._layer.add_child(clone);effect.update(700,420,1);
+    const effect=new OutlineEffect(aod._settings.get_double('brightness'),aod._settings.get_boolean('grayscale'));clone.add_effect(effect);aod._layer.add_child(clone);effect.update(700,420,1);
     aod._layer.add_child(new St.Widget({x:200,y:150,width:700,height:420,style:'border:1px solid rgba(255,255,255,0.25);border-radius:12px;'}));
     this.fixtureEffect=effect;
    };
@@ -60,7 +60,7 @@ export default class Setup extends Extension {
   // Fixture clone uses the same effect/geometry code as actual windows.
   const {OutlineEffect}=await import(Main.extensionManager.lookup('aod@neg-zero.com').dir.get_child('effect.js').get_uri());
   const clone=new Clutter.Clone({source:this.fixture,x:200,y:150,width:700,height:420});
-  const effect=new OutlineEffect(0.25);clone.add_effect(effect);aod._layer.add_child(clone);effect.update(700,420,1);
+  const effect=new OutlineEffect(aod._settings.get_double('brightness'),aod._settings.get_boolean('grayscale'));clone.add_effect(effect);aod._layer.add_child(clone);effect.update(700,420,1);
     aod._layer.add_child(new St.Widget({x:200,y:150,width:700,height:420,style:'border:1px solid rgba(255,255,255,0.25);border-radius:12px;'}));
   await delay(200);await this.capture('aod.png');
   this.progress.width=560;effect.queue_repaint();await delay(300);await this.capture('progress.png');

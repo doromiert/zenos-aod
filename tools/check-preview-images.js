@@ -16,3 +16,15 @@ for(let y=0;y<pixbuf.height;y++)for(let x=0;x<pixbuf.width;x++){
 if(outside)throw Error(`${outside} pixels lit outside window frame`);
 if(!colored)throw Error('Blue progress lost its color');
 print(JSON.stringify({outsideFrameBlack:true,coloredProgressPixels:colored}));
+
+for(const name of ['grayscale.png','lockscreen.png']){
+ const image=GdkPixbuf.Pixbuf.new_from_file(root+'/'+name),bytes=image.get_pixels();
+ let lit=0;
+ for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
+  const i=y*image.rowstride+x*image.n_channels;
+  if(bytes[i]!==bytes[i+1]||bytes[i]!==bytes[i+2])throw Error(`${name} contains color`);
+  if(bytes[i])lit++;
+ }
+ if(!lit)throw Error(`${name} is blank`);
+}
+print('Grayscale verified for live windows and native lockscreen');

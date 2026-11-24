@@ -4,4 +4,5 @@
 <key name="pixel-shift-seconds" type="u"><default>60</default><range min="10" max="600"/><summary>Pixel shift interval</summary></key>
 <key name="original-color-scheme" type="s"><default>''</default><summary>Saved theme preference while AOD is active</summary></key>
 <key name="mode" type="s"><default>'live'</default><choices><choice value="live"/><choice value="lockscreen"/></choices><summary>AOD presentation</summary></key>
+<key name="grayscale" type="b"><default>false</default><summary>Use grayscale instead of original colors</summary></key>
 </schema></schemalist>

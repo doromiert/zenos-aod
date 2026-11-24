@@ -16,6 +16,9 @@ content may remain visible; it cannot reliably identify every app's text or
 progress controls. It reduces lit area/brightness, not the need for monitor
 firmware protection. No credentials, screenshots or window contents are persisted.
 
+The ZenOS GNOME profile enables AOD by default; set
+`desktops.gnome.aod.enable = false` to keep native idle/automatic lock defaults.
+Both styles preserve colors by default, with an optional **Grayscale** switch.
 The ZenOS user option `users.<name>.theming.gnome.aod.enable` installs/enables the
 extension and selects AOD in place of native session idle blanking/automatic
 locking. Dark mode is requested only while AOD is active; the previous explicit

@@ -23,6 +23,8 @@ export async function run(setup,aod){
   const initialRect=source.meta_window.get_frame_rect();
   const clip=entry.clone.get_clip();assert(Math.abs(clip[2]-initialRect.width)<2&&Math.abs(clip[3]-initialRect.height)<2,'filter includes shadow outside frame');
   await setup.capture('aod.png');await delay(1100);await setup.capture('progress.png');
+  aod._settings.set_boolean('grayscale',true);aod.enter();await delay(100);await setup.capture('grayscale.png');
+  aod._settings.set_boolean('grayscale',false);aod.enter();await delay(100);
   const keyboard=global.stage.context.get_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
   keyboard.notify_keyval(GLib.get_monotonic_time(),Clutter.KEY_a,Clutter.KeyState.PRESSED);
   keyboard.notify_keyval(GLib.get_monotonic_time(),Clutter.KEY_a,Clutter.KeyState.RELEASED);await delay(80);
@@ -48,7 +50,7 @@ export async function run(setup,aod){
   const preferences=settingsProcess.spawnv(['gsettings','set','org.gnome.shell.extensions.zenos-aod','mode','lockscreen']);
   await preferences.wait_check_async(null);await delay(150);
   assert(aod._settings.get_string('mode')==='lockscreen','preferences process did not reach Shell settings');
-  aod.enter();await delay(100);
+  aod._settings.set_boolean('grayscale',true);aod.enter();await delay(100);
   assert(aod.active&&aod._usingShield,'native lockscreen mode inactive');
   assert(Main.screenShield._dialog?._clock,'actual GNOME lockscreen clock not used');
   assert(!Main.screenShield.locked,'AOD unexpectedly authenticated/locked the session');
@@ -58,8 +60,8 @@ export async function run(setup,aod){
   keyboard.notify_keyval(GLib.get_monotonic_time(),Clutter.KEY_a,Clutter.KeyState.RELEASED);
   await delay(350);assert(!aod.active&&!Main.screenShield.locked,'lockscreen wake');
   assert(aod._interfaceSettings.get_string('color-scheme')==='prefer-light','lockscreen theme restore');
-  aod._settings.set_string('mode','live');
+  aod._settings.set_boolean('grayscale',false);aod._settings.set_string('mode','live');
   assert(beat<400,'UI heartbeat exceeded400ms');
-  setup.write('result.json',{pass:true,nativeWindow:true,liveUpdates:true,filledText:true,windowFrame:true,shadowClipped:true,themeRestore:true,nativeLockscreen:true,sharedPreferences:true,frameRect:{x:initialRect.x,y:initialRect.y,width:initialRect.width,height:initialRect.height},keyboardWake:true,pointerWake:true,cleanup:true,idleInhibitors:true,maxGap:beat});
+  setup.write('result.json',{pass:true,nativeWindow:true,liveUpdates:true,filledText:true,windowFrame:true,shadowClipped:true,themeRestore:true,nativeLockscreen:true,sharedPreferences:true,grayscaleBothModes:true,frameRect:{x:initialRect.x,y:initialRect.y,width:initialRect.width,height:initialRect.height},keyboardWake:true,pointerWake:true,cleanup:true,idleInhibitors:true,maxGap:beat});
  }finally{GLib.source_remove(timer);aod.wake();app.force_exit();}
 }
