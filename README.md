@@ -7,7 +7,9 @@ bars and thin window frames. Content refreshes once a second; a small pixel shif
 runs every minute, choosing a random offset without consecutive repeats. First pointer, keyboard, scroll or touch input wakes the display
 and consumes that event so it cannot accidentally activate an underlying control.
 
-The moon menu provides Preview and Settings. Idle delay defaults to five minutes;
+The Quick Settings tile toggles automatic AOD; its arrow menu provides Preview
+and Settings. Turning the tile off keeps the desktop awake under the selected
+ZenOS AOD idle policy. Idle delay defaults to five minutes;
 brightness and pixel-shift interval are adjustable. Automatic activation respects
 GNOME session idle inhibitors. Locking manually remains available.
 

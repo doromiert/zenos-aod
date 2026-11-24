@@ -4,7 +4,7 @@ import GLib from 'gi://GLib';
 import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {OutlineEffect} from './effect.js';
 import {SHIFTS,nextShift,visibleWindows,shouldActivate} from './model.js';
@@ -16,13 +16,22 @@ export default class AodExtension extends Extension {
         this._interfaceSettings=new Gio.Settings({schema_id:'org.gnome.desktop.interface'});
         this._restoreTheme();
         this._idle=global.backend.get_core_idle_monitor();
-        this._button=new PanelMenu.Button(0,'Always on display');
-        this._button.add_child(new St.Icon({icon_name:'weather-clear-night-symbolic',style_class:'system-status-icon'}));
-        this._button.menu.addAction('Preview always on display',()=>this.enter());
-        this._button.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._button.menu.addAction('AOD settings',()=>this.openPreferences());
-        Main.panel.addToStatusArea(this.uuid,this._button);
-        this._connect(this._settings,'changed',(_settings,key)=>{if(key==='original-color-scheme')return;this.wake();this._watchIdle();});
+        this._indicator=new QuickSettings.SystemIndicator();
+        this._toggle=new QuickSettings.QuickMenuToggle({
+            title:'AOD',accessible_name:'Always On Display',iconName:'weather-clear-night-symbolic',toggleMode:true,
+            menuButtonAccessibleName:'Always On Display options',
+        });
+        this._settings.bind('automatic',this._toggle,'checked',Gio.SettingsBindFlags.DEFAULT);
+        this._toggle.menu.setHeader('weather-clear-night-symbolic','Always On Display');
+        this._toggle.menu.addAction('Preview',()=>this.enter());
+        this._toggle.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._toggle.menu.addAction('Settings',()=>{
+            Main.panel.statusArea.quickSettings.menu.close();this.openPreferences();
+        });
+        this._indicator.quickSettingsItems.push(this._toggle);
+        Main.panel.statusArea.quickSettings.addExternalIndicator(this._indicator);
+        this._syncToggle();
+        this._connect(this._settings,'changed',(_settings,key)=>{if(key==='original-color-scheme')return;this.wake();this._syncToggle();this._watchIdle();});
         this._connect(global.display,'restacked',()=>this._syncWindows());
         this._connect(global.window_manager,'map',()=>this._syncWindows());
         this._connect(global.window_manager,'destroy',()=>this._syncWindows());
@@ -46,12 +55,18 @@ export default class AodExtension extends Extension {
         this._watchIdle();
     }
     _connect(object,signal,callback) {this._signals.push([object,object.connect(signal,callback)]);}
+    _syncToggle() {
+        this._toggle.subtitle=this._settings.get_boolean('automatic')
+            ?(this._settings.get_string('mode')==='lockscreen'?'Lockscreen':'Live windows'):'Off';
+    }
     _watchIdle() {
         if(this._idleWatch)this._idle.remove_watch(this._idleWatch);
+        this._idleWatch=0;
+        if(!this._settings.get_boolean('automatic'))return;
         this._idleWatch=this._idle.add_idle_watch(this._settings.get_uint('idle-seconds')*1000,()=>this._tryIdle());
     }
     _tryIdle() {
-        if(!this._enabled)return;
+        if(!this._enabled||!this._settings.get_boolean('automatic'))return;
         const generation=this._generation;
         Gio.DBus.session.call('org.gnome.SessionManager','/org/gnome/SessionManager',
             'org.gnome.SessionManager','IsInhibited',new GLib.Variant('(u)',[8]),
@@ -117,7 +132,7 @@ export default class AodExtension extends Extension {
     get active(){return Boolean(this._overlay||this._usingShield);}
     enter() {
         if(!this._enabled||this.active||Main.sessionMode.isLocked)return;
-        this._button.menu.close();this._forceDarkTheme();
+        this._toggle.menu.close();Main.panel.statusArea.quickSettings.menu.close();this._forceDarkTheme();
         if(this._settings.get_string('mode')==='lockscreen')this._enterShield();
         else {
         this._overlay=new St.Widget({name:'zenos-aod',reactive:true,
@@ -192,7 +207,7 @@ export default class AodExtension extends Extension {
         this._idleWatch=0;
         if(this._inhibitorSignal)Gio.DBus.session.signal_unsubscribe(this._inhibitorSignal);
         for(const [object,id] of this._signals??[])object.disconnect(id);
-        this._signals=[];this._button?.destroy();this._button=null;
+        this._signals=[];this._toggle?.destroy();this._indicator?.destroy();this._toggle=null;this._indicator=null;
         this._settings=null;this._interfaceSettings=null;this._idle=null;
     }
 }

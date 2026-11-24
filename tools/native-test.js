@@ -12,10 +12,22 @@ export async function run(setup,aod){
  let beat=0,last=GLib.get_monotonic_time();const timer=GLib.timeout_add(GLib.PRIORITY_DEFAULT,16,()=>{const now=GLib.get_monotonic_time();beat=Math.max(beat,(now-last)/1000);last=now;return GLib.SOURCE_CONTINUE;});
  try{
   Main.overview.hide();let source;
+  assert(!Main.panel.statusArea[aod.uuid],'standalone AOD panel icon still exists');
+  const tile=aod._toggle;
+  assert(tile.get_parent()&&tile.checked,'Quick Settings tile missing or off by default');
+  tile.checked=false;await delay(50);
+  assert(!aod._settings.get_boolean('automatic')&&!aod._idleWatch,'tile did not disable idle activation');
+  tile.checked=true;await delay(50);
+  assert(aod._settings.get_boolean('automatic')&&aod._idleWatch,'tile did not restore idle activation');
+  Main.panel.statusArea.quickSettings.menu.open();await delay(80);await setup.capture('quick-settings.png');
+  tile.menu.open();await delay(300);await setup.capture('quick-settings-menu.png');
+  tile.menu.close();Main.panel.statusArea.quickSettings.menu.close();
   for(let i=0;i<60;i++){source=global.get_window_actors().find(a=>a.meta_window.get_title()==='AOD native window');if(source)break;await delay(50);}
   assert(source,'native GTK fixture did not map');await delay(180);await setup.capture('before.png');
   aod._interfaceSettings.set_string('color-scheme','prefer-light');
-  const start=GLib.get_monotonic_time();aod.enter();await delay(80);
+  const start=GLib.get_monotonic_time();
+  tile.menu._getMenuItems().find(item=>item.label?.text==='Preview').activate(null);await delay(80);
+  assert(!Main.panel.statusArea.quickSettings.menu.isOpen,'Preview left Quick Settings open');
   assert(aod.active&&aod._clones.has(source),'native window not cloned');
   assert(aod._interfaceSettings.get_string('color-scheme')==='prefer-dark','dark mode not requested');
   assert(GLib.get_monotonic_time()-start<400000,'AOD feedback exceeded400ms');
@@ -61,7 +73,10 @@ export async function run(setup,aod){
   await delay(350);assert(!aod.active&&!Main.screenShield.locked,'lockscreen wake');
   assert(aod._interfaceSettings.get_string('color-scheme')==='prefer-light','lockscreen theme restore');
   aod._settings.set_boolean('grayscale',false);aod._settings.set_string('mode','live');
+  let removed=false;tile.connect('destroy',()=>{removed=true;});
+  aod.disable();assert(removed,'tile survived extension disable');
+  aod.enable();assert(aod._toggle!==tile&&aod._toggle.get_parent(),'tile failed to return after re-enable');
   assert(beat<400,'UI heartbeat exceeded400ms');
-  setup.write('result.json',{pass:true,nativeWindow:true,liveUpdates:true,filledText:true,windowFrame:true,shadowClipped:true,themeRestore:true,nativeLockscreen:true,sharedPreferences:true,grayscaleBothModes:true,frameRect:{x:initialRect.x,y:initialRect.y,width:initialRect.width,height:initialRect.height},keyboardWake:true,pointerWake:true,cleanup:true,idleInhibitors:true,maxGap:beat});
+  setup.write('result.json',{pass:true,nativeWindow:true,liveUpdates:true,filledText:true,windowFrame:true,shadowClipped:true,themeRestore:true,nativeLockscreen:true,sharedPreferences:true,grayscaleBothModes:true,quickSettingsTile:true,frameRect:{x:initialRect.x,y:initialRect.y,width:initialRect.width,height:initialRect.height},keyboardWake:true,pointerWake:true,cleanup:true,idleInhibitors:true,maxGap:beat});
  }finally{GLib.source_remove(timer);aod.wake();app.force_exit();}
 }
