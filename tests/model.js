@@ -1,4 +1,4 @@
-import {SHIFTS,nextShift,shouldActivate,visibleWindows} from '../model.js';
+import {SHIFTS,nextShift,shouldActivate,visibleWindows,hasFullscreenWindow} from '../model.js';
 const assert=(v,m)=>{if(!v)throw Error(m);};
 assert(shouldActivate(300000,300,false,false),'idle threshold');
 assert(!shouldActivate(299999,300,false,false),'before threshold');
@@ -22,3 +22,17 @@ assert(shouldActivate(900000,300,false,false,'com.neg-zero.Gnosis'),'ordinary ap
 assert(shouldActivate(900000,300,false,false,null),'no focused window still idles');
 assert(shouldActivate(900000,300,false,false,'steam'),'ordinary Steam window is not the Gamescope session');
 print('Gamescope focus guard checks passed');
+
+const fullscreen={meta_window:{...a.meta_window,is_fullscreen:()=>true}};
+const ordinary={meta_window:{...a.meta_window,is_fullscreen:()=>false}};
+assert(hasFullscreenWindow([ordinary,fullscreen],{}),'any visible fullscreen window blocks, regardless of focus');
+for(const hidden of [
+ {meta_window:{...fullscreen.meta_window,minimized:true}},
+ {meta_window:{...fullscreen.meta_window,showing_on_its_workspace:()=>false}},
+ {meta_window:{...fullscreen.meta_window,located_on_workspace:()=>false}},
+ {},ordinary,
+])assert(!hasFullscreenWindow([hidden],{}),'hidden/other-workspace/non-fullscreen windows do not block');
+for(const focus of [null,'com.neg-zero.Tubefin','ordinary-app'])
+ assert(!shouldActivate(900000,300,false,false,focus,true),'fullscreen blocks even without focus');
+assert(shouldActivate(900000,300,false,false,'ordinary-app',false),'leaving fullscreen permits idle activation');
+print('Fullscreen idle guard checks passed');

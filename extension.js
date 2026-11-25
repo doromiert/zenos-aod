@@ -9,7 +9,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {OutlineEffect} from './effect.js';
-import {SHIFTS,nextShift,visibleWindows,shouldActivate} from './model.js';
+import {SHIFTS,nextShift,visibleWindows,shouldActivate,hasFullscreenWindow} from './model.js';
 
 export default class AodExtension extends Extension {
     enable() {
@@ -36,9 +36,10 @@ export default class AodExtension extends Extension {
         this._connect(this._settings,'changed',(_settings,key)=>{if(key==='original-color-scheme')return;this.wake();this._syncToggle();this._watchIdle();});
         this._connect(global.display,'restacked',()=>this._syncWindows());
         this._connect(global.display,'notify::focus-window',()=>this._tryIdle());
+        this._connect(global.display,'in-fullscreen-changed',()=>this._tryIdle());
         this._connect(global.window_manager,'map',()=>this._syncWindows());
         this._connect(global.window_manager,'destroy',()=>this._syncWindows());
-        this._connect(global.workspace_manager,'active-workspace-changed',()=>this._syncWindows());
+        this._connect(global.workspace_manager,'active-workspace-changed',()=>{this._syncWindows();this._tryIdle();});
         this._connect(Main.layoutManager,'monitors-changed',()=>{
             this._overlay?.set_size(global.stage.width,global.stage.height);
             this._shieldState?.input.set_size(global.stage.width,global.stage.height);this._syncWindows();
@@ -94,7 +95,8 @@ export default class AodExtension extends Extension {
                     const [inhibited]=connection.call_finish(result).deepUnpack();
                     if(this._enabled&&generation===this._generation&&shouldActivate(this._idle.get_idletime(),
                         this._settings.get_uint('idle-seconds'),inhibited,Main.sessionMode.isLocked,
-                        global.display.focus_window?.get_wm_class()))this.enter();
+                        global.display.focus_window?.get_wm_class(),
+                        hasFullscreenWindow(global.get_window_actors(),global.workspace_manager.get_active_workspace())))this.enter();
                 }catch(error){console.warn(`AOD idle check: ${error.message}`);}
             });
     }

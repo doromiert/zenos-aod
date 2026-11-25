@@ -11,7 +11,9 @@ The Quick Settings tile toggles automatic AOD; its arrow menu provides Preview
 and Settings. Turning the tile off keeps the desktop awake under the selected
 ZenOS AOD idle policy. Idle delay defaults to five minutes;
 brightness and pixel-shift interval are adjustable. Automatic activation respects
-GNOME session idle inhibitors before entry. Once visible, AOD remains active
+GNOME session idle inhibitors and visible fullscreen windows on the active
+workspace, across all monitors, before entry. Leaving fullscreen rechecks the
+idle timeout. Manual Preview remains available in fullscreen. Once visible, AOD remains active
 through new windows, focus/workspace changes, notifications and new inhibitors.
 Only nonsynthetic HID input wakes it; explicit controls and real manual locking
 retain their normal cleanup behavior. Locking manually remains available.

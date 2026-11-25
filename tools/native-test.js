@@ -69,13 +69,23 @@ export async function run(setup,aod){
   aod.enter();await delay(50);source.meta_window.move_resize_frame(false,300,180,700,430);await delay(180);
   const rect=source.meta_window.get_frame_rect();assert(Math.abs(aod._clones.get(source).frame.width-rect.width)<2,'frame did not follow resize');
   aod.wake();await setup.capture('restored.png');
-  const oldIdle=aod._idle;let inhibited=true;
-  const service=Gio.DBusExportedObject.wrapJSObject('<node><interface name="org.gnome.SessionManager"><method name="IsInhibited"><arg direction="in" type="u"/><arg direction="out" type="b"/></method><signal name="InhibitorAdded"><arg type="o"/></signal><signal name="InhibitorRemoved"><arg type="o"/></signal></interface></node>',{IsInhibited:()=>inhibited});
+  const oldIdle=aod._idle;let inhibited=true,beforeReply=null;
+  const service=Gio.DBusExportedObject.wrapJSObject('<node><interface name="org.gnome.SessionManager"><method name="IsInhibited"><arg direction="in" type="u"/><arg direction="out" type="b"/></method><signal name="InhibitorAdded"><arg type="o"/></signal><signal name="InhibitorRemoved"><arg type="o"/></signal></interface></node>',{IsInhibited:()=>{const before=beforeReply;beforeReply=null;before?.();return inhibited;}});
   service.export(Gio.DBus.session,'/org/gnome/SessionManager');
   const owner=Gio.bus_own_name_on_connection(Gio.DBus.session,'org.gnome.SessionManager',Gio.BusNameOwnerFlags.NONE,null,null);
   try{
    aod._idle={get_idletime:()=>301000,add_user_active_watch:fn=>oldIdle.add_user_active_watch(fn),remove_watch:id=>oldIdle.remove_watch(id)};
    await delay(80);aod._tryIdle();await delay(100);assert(!aod.active,'idle inhibitor ignored');
+   inhibited=false;beforeReply=()=>source.meta_window.make_fullscreen();
+   aod._tryIdle();await delay(250);
+   assert(source.meta_window.is_fullscreen()&&!aod.active,'fullscreen entered during inhibitor query did not block AOD');
+   aod._tryIdle();await delay(150);assert(!aod.active,'fullscreen did not block idle activation');
+   aod.enter();await delay(100);assert(aod.active,'manual fullscreen preview blocked');aod.wake();
+   source.meta_window.unmake_fullscreen();await delay(250);
+   assert(aod.active,'leaving fullscreen did not reconsider idle activation');
+   source.meta_window.make_fullscreen();await delay(150);
+   assert(aod.active,'fullscreen change dismissed active AOD');
+   source.meta_window.unmake_fullscreen();await delay(150);aod.wake();
    inhibited=false;service.emit_signal('InhibitorRemoved',new GLib.Variant('(o)',['/test/inhibitor']));await delay(120);assert(aod.active,'idle did not activate after inhibitor removed');
    inhibited=true;service.emit_signal('InhibitorAdded',new GLib.Variant('(o)',['/test/inhibitor']));await delay(120);assert(aod.active,'new inhibitor dismissed active AOD');aod.wake();
    aod._idle=oldIdle;inhibited=false;
@@ -117,6 +127,6 @@ export async function run(setup,aod){
   aod.disable();assert(removed,'tile survived extension disable');
   aod.enable();assert(aod._toggle!==tile&&aod._toggle.get_parent(),'tile failed to return after re-enable');
   assert(beat<400,'UI heartbeat exceeded400ms');
-  setup.write('result.json',{pass:true,nativeWindow:true,liveUpdates:true,filledText:true,windowFrame:true,shadowClipped:true,themeRestore:true,nativeLockscreen:true,sharedPreferences:true,grayscaleBothModes:true,quickSettingsTile:true,frameRect:{x:initialRect.x,y:initialRect.y,width:initialRect.width,height:initialRect.height},keyboardWake:true,pointerWake:true,cleanup:true,idleInhibitors:true,nativeIdleTimeout:true,hidOnlyWake:true,backgroundWindow:true,buttonWake:true,scrollWake:true,maxGap:beat});
+  setup.write('result.json',{pass:true,nativeWindow:true,liveUpdates:true,filledText:true,windowFrame:true,shadowClipped:true,themeRestore:true,nativeLockscreen:true,sharedPreferences:true,grayscaleBothModes:true,quickSettingsTile:true,frameRect:{x:initialRect.x,y:initialRect.y,width:initialRect.width,height:initialRect.height},keyboardWake:true,pointerWake:true,cleanup:true,idleInhibitors:true,fullscreenGuard:true,fullscreenReplyRace:true,fullscreenManualPreview:true,nativeIdleTimeout:true,hidOnlyWake:true,backgroundWindow:true,buttonWake:true,scrollWake:true,maxGap:beat});
  }finally{GLib.source_remove(timer);aod.wake();popup?.force_exit();app.force_exit();}
 }

@@ -4,8 +4,11 @@ export function visibleWindows(actors,workspace) {
     return actors.filter(actor=>actor.meta_window&&!actor.meta_window.minimized&&
         actor.meta_window.showing_on_its_workspace()&&actor.meta_window.located_on_workspace(workspace));
 }
-export function shouldActivate(idle,seconds,inhibited,locked,focusedApp=null) {
-    return idle>=seconds*1000&&!inhibited&&!locked&&String(focusedApp??'').toLowerCase()!=='gamescope';
+export function hasFullscreenWindow(actors,workspace) {
+    return visibleWindows(actors,workspace).some(actor=>actor.meta_window.is_fullscreen());
+}
+export function shouldActivate(idle,seconds,inhibited,locked,focusedApp=null,fullscreen=false) {
+    return idle>=seconds*1000&&!inhibited&&!locked&&!fullscreen&&String(focusedApp??'').toLowerCase()!=='gamescope';
 }
 
 export function nextShift(current,random=Math.random) {

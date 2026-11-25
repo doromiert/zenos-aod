@@ -6,7 +6,7 @@
     "50"
   ],
   "settings-schema": "org.gnome.shell.extensions.zenos-aod",
-  "version": 6,
+  "version": 7,
   "url": "https://github.com/doromiert/zenos-aod",
   "session-modes": [
     "user",
