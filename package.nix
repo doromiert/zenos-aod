@@ -1,6 +1,6 @@
 {lib,stdenvNoCC,glib,gjs}:
 stdenvNoCC.mkDerivation {
-  pname="gnome-shell-extension-zenos-aod";version="0.1.4";
+  pname="gnome-shell-extension-zenos-aod";version="0.1.5";
   src=lib.cleanSource ./.;nativeBuildInputs=[glib];dontBuild=true;
   doCheck=true;nativeCheckInputs=[gjs];
   checkPhase="gjs -m tests/model.js";

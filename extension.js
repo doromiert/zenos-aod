@@ -35,6 +35,7 @@ export default class AodExtension extends Extension {
         this._syncToggle();
         this._connect(this._settings,'changed',(_settings,key)=>{if(key==='original-color-scheme')return;this.wake();this._syncToggle();this._watchIdle();});
         this._connect(global.display,'restacked',()=>this._syncWindows());
+        this._connect(global.display,'notify::focus-window',()=>this._tryIdle());
         this._connect(global.window_manager,'map',()=>this._syncWindows());
         this._connect(global.window_manager,'destroy',()=>this._syncWindows());
         this._connect(global.workspace_manager,'active-workspace-changed',()=>this._syncWindows());
@@ -92,7 +93,8 @@ export default class AodExtension extends Extension {
                 try {
                     const [inhibited]=connection.call_finish(result).deepUnpack();
                     if(this._enabled&&generation===this._generation&&shouldActivate(this._idle.get_idletime(),
-                        this._settings.get_uint('idle-seconds'),inhibited,Main.sessionMode.isLocked))this.enter();
+                        this._settings.get_uint('idle-seconds'),inhibited,Main.sessionMode.isLocked,
+                        global.display.focus_window?.get_wm_class()))this.enter();
                 }catch(error){console.warn(`AOD idle check: ${error.message}`);}
             });
     }

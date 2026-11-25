@@ -15,3 +15,10 @@ for(let current=0;current<SHIFTS.length;current++){
  assert(!candidates.includes(current),"no repeated position");
  assert(new Set(candidates).size===SHIFTS.length-1,"all other positions reachable");
 }
+
+assert(!shouldActivate(900000,300,false,false,'gamescope'),'Gamescope blocks automatic AOD after long controller-only idle');
+assert(!shouldActivate(900000,300,false,false,'Gamescope'),'case-insensitive Gamescope identity');
+assert(shouldActivate(900000,300,false,false,'com.neg-zero.Gnosis'),'ordinary apps still idle');
+assert(shouldActivate(900000,300,false,false,null),'no focused window still idles');
+assert(shouldActivate(900000,300,false,false,'steam'),'ordinary Steam window is not the Gamescope session');
+print('Gamescope focus guard checks passed');
